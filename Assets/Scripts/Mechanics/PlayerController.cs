@@ -1,6 +1,7 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using Platformer.Gameplay;
 using static Platformer.Core.Simulation;
 using Platformer.Model;
@@ -8,29 +9,19 @@ using Platformer.Core;
 
 namespace Platformer.Mechanics
 {
-    /// <summary>
-    /// This is the main class used to implement control of the player.
-    /// It is a superset of the AnimationController class, but is inlined to allow for any kind of customisation.
-    /// </summary>
     public class PlayerController : KinematicObject
     {
         public AudioClip jumpAudio;
         public AudioClip respawnAudio;
         public AudioClip ouchAudio;
 
-        /// <summary>
-        /// Max horizontal speed of the player.
-        /// </summary>
         public float maxSpeed = 7;
-        /// <summary>
-        /// Initial jump velocity at the start of a jump.
-        /// </summary>
         public float jumpTakeOffSpeed = 7;
 
         public JumpState jumpState = JumpState.Grounded;
         private bool stopJump;
-        /*internal new*/ public Collider2D collider2d;
-        /*internal new*/ public AudioSource audioSource;
+        public Collider2D collider2d;
+        public AudioSource audioSource;
         public Health health;
         public bool controlEnabled = true;
 
@@ -42,6 +33,18 @@ namespace Platformer.Mechanics
 
         public Bounds Bounds => collider2d.bounds;
 
+        public GameObject projectilePrefab;
+        public Transform firePoint;
+        public float projectileSpeed = 10f;
+
+        public int maxAmmo = 8;
+        private int currentAmmo;
+        public float reloadTime = 2f;
+        private bool isReloading = false;
+
+        public float levelTimeLimit = 600f; // 10-minute timer in seconds
+        private float currentTime;
+
         void Awake()
         {
             health = GetComponent<Health>();
@@ -49,6 +52,8 @@ namespace Platformer.Mechanics
             collider2d = GetComponent<Collider2D>();
             spriteRenderer = GetComponent<SpriteRenderer>();
             animator = GetComponent<Animator>();
+            currentAmmo = maxAmmo;
+            currentTime = levelTimeLimit;
         }
 
         protected override void Update()
@@ -63,13 +68,87 @@ namespace Platformer.Mechanics
                     stopJump = true;
                     Schedule<PlayerStopJump>().player = this;
                 }
+
+                if (Input.GetButtonDown("Fire1"))
+                {
+                    FireWeapon();
+                }
+
+                if (Input.GetKeyDown(KeyCode.R) && currentAmmo < maxAmmo && !isReloading)
+                {
+                    StartCoroutine(Reload());
+                }
             }
             else
             {
                 move.x = 0;
             }
+            
+            UpdateTimer();
             UpdateJumpState();
             base.Update();
+        }
+
+        void UpdateTimer()
+        {
+            currentTime -= Time.deltaTime;
+            if (currentTime <= 0)
+            {
+                LevelFailed();
+            }
+        }
+
+        void LevelFailed()
+        {
+            Debug.Log("Time's up! Level failed.");
+            // Reload current scene or show Game Over
+            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+        }
+
+        void FireWeapon()
+        {
+            if (isReloading) return;
+
+            if (currentAmmo > 0)
+            {
+                if (projectilePrefab != null && firePoint != null)
+                {
+                    GameObject projectile = Instantiate(projectilePrefab, firePoint.position, firePoint.rotation);
+                    
+                    if (projectile.GetComponent<Rigidbody2D>() == null)
+                    {
+                        Rigidbody2D rb = projectile.AddComponent<Rigidbody2D>();
+                        rb.gravityScale = 0;
+                    }
+                    if (projectile.GetComponent<BoxCollider2D>() == null)
+                    {
+                        projectile.AddComponent<BoxCollider2D>();
+                    }
+                    if (projectile.GetComponent<Projectile>() == null)
+                    {
+                        projectile.AddComponent<Projectile>();
+                    }
+
+                    Rigidbody2D rb2d = projectile.GetComponent<Rigidbody2D>();
+                    rb2d.velocity = new Vector2(spriteRenderer.flipX ? -projectileSpeed : projectileSpeed, 0);
+
+                    currentAmmo--;
+                }
+            }
+            else
+            {
+                StartCoroutine(Reload());
+            }
+        }
+
+        IEnumerator Reload()
+        {
+            isReloading = true;
+            Debug.Log("Reloading...");
+            yield return new WaitForSeconds(reloadTime);
+            currentAmmo = maxAmmo;
+            isReloading = false;
+            Debug.Log("Reloaded!");
         }
 
         void UpdateJumpState()
